@@ -24,51 +24,6 @@ def write_image(file_path, image):
     else:
         print(f"Image successfully written to {file_path}")
 
-def binarize_image(image, threshold=230):
-    # Convert the image to grayscale
-    gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    
-    # Apply binary thresholding to the grayscale image
-    _, binary_image = cv2.threshold(gray_image, threshold, 255, cv2.THRESH_BINARY)
-    
-    return binary_image
-
-def erode_image(image, kernel_size=3):
-    # Create a structuring element (kernel) for erosion
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kernel_size, kernel_size))
-    
-    # Apply erosion to the image using the kernel
-    eroded_image = cv2.erode(image, kernel, iterations=1)
-    
-    return eroded_image
-
-def dilate_image(image, kernel_size=3):
-    # Create a structuring element (kernel) for dilation
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kernel_size, kernel_size))
-    
-    # Apply dilation to the image using the kernel
-    dilated_image = cv2.dilate(image, kernel, iterations=1)
-    
-    return dilated_image
-
-def close_image(image, kernel_size=3):
-    # Create a structuring element (kernel) for closing
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kernel_size, kernel_size))
-    
-    # Apply closing to the image using the kernel
-    closed_image = cv2.morphologyEx(image, cv2.MORPH_CLOSE, kernel)
-    
-    return closed_image
-
-def open_image(image, kernel_size=3):
-    # Create a structuring element (kernel) for opening
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kernel_size, kernel_size))
-    
-    # Apply opening to the image using the kernel
-    opened_image = cv2.morphologyEx(image, cv2.MORPH_OPEN, kernel)
-    
-    return opened_image
-
 def find_pellets(image, intensity_percentage=0.95, min_pallet=30, max_pallet=4, compactness_threshold=0.75, retry_step=0.05, output_path=None):
     image = image.copy()
     # Check if the image has 3 channels (not grayscale)
