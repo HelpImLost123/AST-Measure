@@ -1,7 +1,10 @@
+import math
 import os
 
 import cv2
 import numpy as np
+
+from canny2 import filter_rgb_to_black, manual_canny
 
 def read_images(file_path):
     # Read the image from the specified file path
@@ -232,18 +235,18 @@ def get_pellet_ROI(image, detected_pellets, target_cx, target_cy, diameter):
     return roi, (sub_cx, sub_cy), diameter
 
 def main():
-    file_name = '7.23.1. original.jpg'
-    file2 = '6.7.1. original.jpg'
-    file3 = '6.20.1. original.jpg'
-    file4 = '7.8.1. original.jpg'
-    file5 = 'test.jpg'
-    file6 = 'test2.jpg'
+    file_name = '6.65.1. original.jpg'
+    # file2 = '6.7.1. original.jpg'
+    # file3 = '6.20.1. original.jpg'
+    # file4 = '7.8.1. original.jpg'
+    # file5 = 'test.jpg'
+    # file6 = 'test2.jpg'
     img = read_images(f'dataset\\{file_name}')
-    img2 = read_images(f'dataset\\{file2}')
-    img3 = read_images(f'dataset\\{file3}')
-    img4 = read_images(f'dataset\\{file4}')
-    img5 = read_images(f'dataset\\{file5}')
-    img6 = read_images(f'dataset\\{file6}')
+    # img2 = read_images(f'dataset\\{file2}')
+    # img3 = read_images(f'dataset\\{file3}')
+    # img4 = read_images(f'dataset\\{file4}')
+    # img5 = read_images(f'dataset\\{file5}')
+    # img6 = read_images(f'dataset\\{file6}')
 
     if img is not None:
         detected = find_pellets(img, output_path=f'output\\{file_name}', seSize=7, intensity_percentage=0.9)
@@ -264,6 +267,202 @@ def main():
         cv2.destroyAllWindows()
     else:
         print("Image not found or could not be read.")
+# if __name__ == "__main__":
+#     main()
+def get_all_centers(detected_pellets):
+    """
+    Extracts a list of (cx, cy) tuples from the detected_pellets list.
+    """
+    centers = []
+    for entry in detected_pellets:
+        # entry structure: ((x, y, w, h), cx, cy, diameter, compactness)
+        # cx is at index 1, cy is at index 2
+        cx, cy = entry[1], entry[2]
+        centers.append((cx, cy))
+    return centers    
+
+# draw line and find circle edge
+import cv2
+import numpy as np
+
+def count_pixels_along_line(image, img_to_draw, center, angle_degrees, max_length=100):
+    # Ensure grayscale for logic
+    gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) == 3 else image
+
+    cx, cy = center
+    angle_radians = np.radians(angle_degrees)
+    end_x = int(cx + max_length * np.cos(angle_radians))
+    end_y = int(cy + max_length * np.sin(angle_radians))
+    
+    # Generate points along the line
+    line_points = np.linspace((cx, cy), (end_x, end_y), num=max_length).astype(int)
+    
+    found_points = []
+    bg_count = 0
+    last_hit_index = -100 
+    
+    for i, (x, y) in enumerate(line_points):
+        if 0 <= y < gray_image.shape[0] and 0 <= x < gray_image.shape[1]:
+            # Skip initial 20px (center of pellet)
+            if i > 20:
+                # Check for white pixel (>50) and cooldown (10px gap)
+                if gray_image[y, x] > 50 and (i - last_hit_index >= 10):
+                    cv2.circle(img_to_draw, (x, y), 2, (0, 0, 255), -1)
+                    found_points.append([int(x), int(y)]) # Store as [x, y]
+                    last_hit_index = i 
+                    
+                    if len(found_points) >= 2:
+                        break
+
+            if gray_image[y, x] <= 50:
+                bg_count += 1
+    
+    cv2.line(img_to_draw, center, (end_x, end_y), (100, 100, 100), 1)
+    
+    # Return only the last point found for this specific ray
+    last_point = found_points[-1] if found_points else None
+    return bg_count, len(found_points), last_point
+
+def overlay_edges(original_img, edge_map):
+    # 1. Ensure edge_map is 8-bit grayscale
+    if len(edge_map.shape) == 3:
+        edge_map = cv2.cvtColor(edge_map, cv2.COLOR_BGR2GRAY)
         
-if __name__ == "__main__":
-    main()
+    # 2. Normalize if it's float64 (as your manual_canny is)
+    if edge_map.dtype != np.uint8:
+        edge_map = cv2.normalize(edge_map, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+        
+    # 3. Create a copy of the original to draw on
+    composite = original_img.copy()
+    
+    # 4. Use the edge map to color pixels RED (0,0,255)
+    # Wherever the edge map is white (pixel > 0), set the original image to Red
+    composite[edge_map > 0] = [0, 0, 255]
+    
+    return composite
+def calculate_average_radius_pruned(center, surface_points, threshold=1.5):
+    if not surface_points: return 0.0
+    cx, cy = center
+    # Calculate all distances
+    distances = [math.sqrt((p[0]-cx)**2 + (p[1]-cy)**2) for p in surface_points]
+    
+    dist_arr = np.array(distances)
+    mean_d = np.mean(dist_arr)
+    std_d = np.std(dist_arr)
+    
+    # Prune outliers: Keep points within Mean +/- (threshold * STD)
+    filtered = [d for d in distances if (mean_d - threshold*std_d) <= d <= (mean_d + threshold*std_d)]
+    
+    return sum(filtered) / len(filtered) if filtered else 0.0
+def test():
+    file_name = '6.65.1. original.jpg'
+    img = read_images(f'dataset\\{file_name}')
+    
+    if img is None:
+        return
+
+    # 1. Processing
+    img_filter_black = filter_rgb_to_black(img)[0]
+    gray_frame = cv2.cvtColor(img_filter_black, cv2.COLOR_BGR2GRAY)
+    canny_img = manual_canny(gray_frame, 100, 150)
+    # 2. Overlay edges on the original image
+    # This replaces pixels where edges are detected with Red
+    composite_img = overlay_edges(img, canny_img)
+    
+    # 3. Pellet detection and Drawing (as you already have)
+    
+    
+    # --- CRITICAL FIX START ---
+    # Normalize the 64-bit float canny output to 8-bit (0-255)
+    canny_norm = cv2.normalize(canny_img, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+    
+    # Convert to BGR so we can draw RED (0,0,255) color on it
+    canny_img_bgr = cv2.cvtColor(canny_norm, cv2.COLOR_GRAY2BGR)
+    # --- CRITICAL FIX END ---
+
+    # 2. Pellet detection
+    detected = find_pellets(img, output_path=f'output\\{file_name}', seSize=7, intensity_percentage=0.9)
+   
+    
+    # 3. Drawing
+    for i, ((x, y, w, h), cx, cy, diameter, compactness) in enumerate(detected):
+        # Draw on the ORIGINAL image
+        cv2.circle(img, (int(cx), int(cy)), 2, (0, 0, 255), -1)
+        
+        # Draw on the CANNY image
+        cv2.circle(canny_img_bgr, (int(cx), int(cy)), 3, (0, 0, 255), -1)
+    
+    # 4. Display
+    cv2.imshow('Pellet Centers', img)
+    cv2.imshow('Canny Output', canny_img_bgr) # Show the colorized Canny
+    cv2.imshow('Overlay Result', composite_img)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+
+
+def test2():
+    file_name = '6.65.1. original.jpg'
+    img = read_images(f'dataset\\{file_name}')
+    if img is None: return
+    img_filter_black = filter_rgb_to_black(img)[0]
+    gray_frame = cv2.cvtColor(img_filter_black, cv2.COLOR_BGR2GRAY)
+    canny_img = manual_canny(gray_frame, 100, 150)
+    composite_img = overlay_edges(img, canny_img)
+    # ... [Your existing processing logic] ...
+    canny_norm = cv2.normalize(canny_img, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+    canny_img_bgr = cv2.cvtColor(canny_norm, cv2.COLOR_GRAY2BGR)
+
+    # 2. Pellet detection
+    detected = find_pellets(img, output_path=f'output\\{file_name}', seSize=7, intensity_percentage=0.9)
+    
+    # 3. Drawing and Analysis
+    for i, pellet in enumerate(detected):
+        # Unpack the structure: ((x, y, w, h), cx, cy, diameter, compactness)
+        _, cx, cy, _, _ = pellet
+        center_point = (int(cx), int(cy))
+
+        # Draw center on original and canny
+        cv2.circle(img, center_point, 2, (0, 0, 255), -1)
+        cv2.circle(canny_img_bgr, center_point, 3, (0, 0, 255), -1)
+        text = str(i)
+        cv2.putText(canny_img_bgr, text, (int(cx) + 10, int(cy) - 10), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
+        last_coor = []
+        # --- NEW: Call and visualize line scan ---
+        for angle in range(5, 361, 5):
+            pellet_idx, _, last_pt = count_pixels_along_line(canny_img_bgr, canny_img_bgr, center_point, angle, 110)
+            
+            if last_pt is not None:
+                last_coor.append(last_pt) # Append the [x, y] list
+        # --- Analysis & Pruning ---
+        # Only proceed if we have at least 36 rays hitting the surface
+        if len(last_coor) >= 36:
+            # Note: Changed 'outer_surface_points' to 'last_coor' to match your list name
+            avg_r = calculate_average_radius_pruned(center_point, last_coor, threshold=1.5)  
+            
+            if avg_r > 0:
+                # Draw the final result (Green circle for the average radius)
+                cv2.circle(canny_img_bgr, center_point, int(avg_r), (0, 255, 0), 2)
+                
+                print(f"Pellet {i} Analysis:")
+                print(f"  - Valid points (pre-prune): {len(last_coor)}")
+                print(f"  - Average Radius: {avg_r:.2f} pixels")
+            else:
+                print(f"Pellet {i} rejected: Pruning removed too many outliers.")
+        else:
+            print(f"Pellet {i} rejected: Only {len(last_coor)} hits (Minimum 36 required).")
+        # # Draw the line on the image to see what we are checking
+        # dx = np.cos(np.radians(angle))
+        # dy = np.sin(np.radians(angle))
+        # end_point = (int(cx + 100 * dx), int(cy + 100 * dy))
+        # cv2.line(canny_img_bgr, center_point, end_point, (255, 255, 0), 1)
+
+    # 4. Display
+    cv2.imshow('Pellet Centers', img)
+    cv2.imshow('Canny Output', canny_img_bgr)
+    cv2.imshow('Overlay Result', composite_img)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+    
+test2()
+
