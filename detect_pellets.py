@@ -24,7 +24,7 @@ def write_image(file_path, image):
     else:
         print(f"Image successfully written to {file_path}")
 
-def find_pellets(image, intensity_percentage=0.95, min_pallet=30, max_pallet=4, compactness_threshold=0.75, retry_step=0.05, output_path=None):
+def find_pellets(image, intensity_percentage=0.95, seSize=None, min_pallet=30, max_pallet=4, compactness_threshold=0.75, retry_step=0.05, output_path= str | None):
     image = image.copy()
     # Check if the image has 3 channels (not grayscale)
     if len(image.shape) == 3 and image.shape[2] == 3:
@@ -38,12 +38,12 @@ def find_pellets(image, intensity_percentage=0.95, min_pallet=30, max_pallet=4, 
     equalized = cv2.equalizeHist(gray)
     # cv2.imshow('Equalized Image', equalized)
     
-
     minPelletDiameter = int((min(gray.shape) / min_pallet))
     maxPelletDiameter = int((min(gray.shape) / max_pallet))
     
-    seSize = max(3, int(minPelletDiameter / 10))
-    print(f"Structuring Element Size: {seSize}")
+    if seSize is None:
+        seSize = max(3, int(minPelletDiameter / 5))
+        print(f"Structuring Element Size: {seSize}")
 
     se = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (seSize, seSize))
 
@@ -75,9 +75,12 @@ def find_pellets(image, intensity_percentage=0.95, min_pallet=30, max_pallet=4, 
 
             (cx, cy), radius = cv2.minEnclosingCircle(approx)
             diameter = radius * 2
-
+            
+            # Filter out the circle that are out of bounds
             if cx - radius < 0 or cy - radius < 0 or cx + radius > img_w or cy + radius > img_h:
                 continue
+            
+            # Filter out the objects that are too small or too large to be pellets
             if diameter < minPelletDiameter or diameter > maxPelletDiameter:
                 continue
 
@@ -96,10 +99,12 @@ def find_pellets(image, intensity_percentage=0.95, min_pallet=30, max_pallet=4, 
                 write_image(f'{output_path}\\5_detected.jpg', image)
             break
 
-        print(f"No pellets found at threshold {threshold:.2f}, retrying...")
-        threshold -= retry_step
-    else:
-        print("No pellets detected after exhausting all thresholds.")
+        if retry_step > 0:
+            print(f"No pellets found at threshold {threshold:.2f}, retrying...")
+            threshold -= retry_step
+        else:
+            print("No pellets detected after exhausting all thresholds.")
+            break
 
     cv2.imshow('Detected Pellets', image)
     
@@ -108,11 +113,11 @@ def find_pellets(image, intensity_percentage=0.95, min_pallet=30, max_pallet=4, 
     
 
 def main():
-    file_name = '6.63.1. original.jpg'
+    file_name = 'test2.jpg'
     img = read_images(f'dataset\\{file_name}')
 
     if img is not None:
-        detected = find_pellets(img, output_path=f'output\\{file_name}')
+        detected = find_pellets(img, output_path=f'output\\{file_name}', intensity_percentage=0.89, retry_step=0.01)
 
         cv2.waitKey(0)
         cv2.destroyAllWindows()
