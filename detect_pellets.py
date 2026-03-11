@@ -108,11 +108,11 @@ def find_pellets(image, intensity_percentage=0.95, min_pallet=30, max_pallet=4, 
     
 
 def main():
-    file_name = '6.63.1. original.jpg'
+    file_name = '6.65.1. original.jpg'
     img = read_images(f'dataset\\{file_name}')
-
+    img_invert = cv2.bitwise_not(img)
     if img is not None:
-        detected = find_pellets(img, output_path=f'output\\{file_name}')
+        detected = find_pellets(img_invert, output_path=f'output\\{file_name}')
 
         cv2.waitKey(0)
         cv2.destroyAllWindows()
