@@ -28,7 +28,7 @@ def write_image(file_path, image):
 # seSize: structuring element size for morphological operations, if None it will be calculated based on the minimum pellet size.
 # min_pellet: the estimated number of pellets of the smaller estimated size that can fit on the petri dish
 # max_pellet: the estimated number of pellets of the bigger estimated size that can fit on the petri dish
-def find_pellets(image, intensity_percentage=0.95, seSize=None, min_pellet=30, max_pellet=4, compactness_threshold=0.75, retry_step=0.05, output_path=None):
+def find_pellets(image, intensity_percentage=0.95, seSize=None, min_pellet=24, max_pellet=12, compactness_threshold=0.75, retry_step=0.05, output_path=None):
     image = image.copy()
     # Check if the image has 3 channels (not grayscale)
     if len(image.shape) == 3 and image.shape[2] == 3:
@@ -121,7 +121,7 @@ def find_pellets(image, intensity_percentage=0.95, seSize=None, min_pellet=30, m
 
         if detected:
             for (x, y, w, h), cx, cy, diameter, compactness in detected:
-                cv2.circle(image, (int(cx), int(cy)), int(diameter/2), (0, 255, 0), 2)
+                cv2.circle(image, (int(cx), int(cy)), int(diameter/2), (0, 0, 255), 2)
                 print(f"Detected pellet | cx: {cx}, cy: {cy}, diameter: {diameter:.1f} px, compactness: {compactness:.2f}")
             if output_path:
                 write_image(f'{output_path}\\5_detected.jpg', image)
@@ -185,12 +185,77 @@ def visualize_max_min_pellet(image, min_pellet=30, max_pellet=4):
 
     return out
 
+def get_avg_mm_per_pixel(detected_pellets, pellet_mm_size=6):
+    sum = 0
+    for (x, y, w, h), cx, cy, diameter, compactness in detected_pellets:
+        sum += diameter
+    avg_diameter = sum / len(detected_pellets) if detected_pellets else 0
+    return pellet_mm_size / avg_diameter if avg_diameter else 0
+
+def find_closest_pellet(detected_pellets, target_cx, target_cy):
+    closest = None
+    min_dist = float('inf')
+    
+    for (x, y, w, h), cx, cy, diameter, compactness in detected_pellets:
+        if target_cx == cx and target_cy == cy:
+            continue
+        dist = np.sqrt((cx - target_cx) ** 2 + (cy - target_cy) ** 2)
+        if dist < min_dist:
+            min_dist = dist
+            closest = (cx, cy, diameter)
+    
+    return closest
+
+def get_pellet_ROI(image, detected_pellets, target_cx, target_cy, diameter):
+    closest = find_closest_pellet(detected_pellets, target_cx, target_cy)
+    if closest is None:
+        return None, None, None
+
+    image_width = image.shape[1]
+    image_height = image.shape[0]
+    
+    closest_cx, closest_cy, closest_diameter = closest
+    closest_radius = closest_diameter / 2
+    roi_radius = max(abs(target_cx-closest_cx), abs(target_cy-closest_cy)) - closest_radius
+
+    x1 = max(0, int(target_cx - roi_radius))
+    y1 = max(0, int(target_cy - roi_radius))
+    x2 = min(image_width,  int(target_cx + roi_radius))
+    y2 = min(image_height, int(target_cy + roi_radius))
+    
+    roi = image[y1:y2, x1:x2]
+
+    # Center of the target pellet relative to the clamped sub-image
+    sub_cx = target_cx - x1
+    sub_cy = target_cy - y1
+    
+    return roi, (sub_cx, sub_cy), diameter
+
 def main():
     file_name = '7.23.1. original.jpg'
+    file2 = '6.7.1. original.jpg'
+    file3 = '6.20.1. original.jpg'
+    file4 = '7.8.1. original.jpg'
+    file5 = 'test.jpg'
+    file6 = 'test2.jpg'
     img = read_images(f'dataset\\{file_name}')
+    img2 = read_images(f'dataset\\{file2}')
+    img3 = read_images(f'dataset\\{file3}')
+    img4 = read_images(f'dataset\\{file4}')
+    img5 = read_images(f'dataset\\{file5}')
+    img6 = read_images(f'dataset\\{file6}')
 
     if img is not None:
         detected = find_pellets(img, output_path=f'output\\{file_name}', seSize=7, intensity_percentage=0.9)
+
+        rois = []
+        for i, ((x, y, w, h), cx, cy, diameter, compactness) in enumerate(detected):
+            roi, sub_center, diam = get_pellet_ROI(img, detected, cx, cy, diameter)
+            if roi is not None:
+                rois.append(roi)
+                cv2.circle(img, (int(cx), int(cy)), int(diam/2), (0, 0, 255), 2)
+                print(f"Pellet {i+1} sub-image center: {sub_center}")
+                write_image(f'output\\{file_name}\\ROI\\pellet_{i+1}.jpg', roi)
 
         # size_viz = visualize_max_min_pellet(img, min_pellet=20, max_pellet=12)
         # cv2.imshow('Min / Max Pellet Size', size_viz)
