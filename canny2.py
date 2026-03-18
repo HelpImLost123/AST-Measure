@@ -67,6 +67,7 @@ def manual_canny(img_gray, low_threshold=50, high_threshold=150):
 
     # 5. Double Thresholding
     res = np.zeros_like(nms)
+    # mask edge in white
     res[nms >= high_threshold] = 255
     res[(nms >= low_threshold) & (nms < high_threshold)] = 50 
     

@@ -1,7 +1,9 @@
+import glob
 import math
 import os
 
 import cv2
+from matplotlib import pyplot as plt
 import numpy as np
 
 from canny2 import filter_rgb_to_black, manual_canny
@@ -267,8 +269,8 @@ def main():
         cv2.destroyAllWindows()
     else:
         print("Image not found or could not be read.")
-# if __name__ == "__main__":
-#     main()
+
+
 def get_all_centers(detected_pellets):
     """
     Extracts a list of (cx, cy) tuples from the detected_pellets list.
@@ -282,9 +284,7 @@ def get_all_centers(detected_pellets):
     return centers    
 
 # draw line and find circle edge
-import cv2
-import numpy as np
-
+#Function to count pixel
 def count_pixels_along_line(image, img_to_draw, center, angle_degrees, max_length=100):
     # Ensure grayscale for logic
     gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) == 3 else image
@@ -297,32 +297,38 @@ def count_pixels_along_line(image, img_to_draw, center, angle_degrees, max_lengt
     # Generate points along the line
     line_points = np.linspace((cx, cy), (end_x, end_y), num=max_length).astype(int)
     
+    #all point founded 
     found_points = []
-    bg_count = 0
-    last_hit_index = -100 
+    # pixel that is not edge count along the line
+    black_pixel = 0
+    # line length limit
+    last_hit_index = -max_length 
     
     for i, (x, y) in enumerate(line_points):
         if 0 <= y < gray_image.shape[0] and 0 <= x < gray_image.shape[1]:
             # Skip initial 20px (center of pellet)
-            if i > 20:
+            if i > 25:
                 # Check for white pixel (>50) and cooldown (10px gap)
                 if gray_image[y, x] > 50 and (i - last_hit_index >= 10):
-                    cv2.circle(img_to_draw, (x, y), 2, (0, 0, 255), -1)
-                    found_points.append([int(x), int(y)]) # Store as [x, y]
+                    # dot red dot 
+                    cv2.circle(img_to_draw, (x, y), 2, (0, 0, 255), -1)                
+                    found_points.append([int(x), int(y)]) # Store as [x, y]                
                     last_hit_index = i 
                     
                     if len(found_points) >= 2:
                         break
-
+            # count pixel along the line tha black
             if gray_image[y, x] <= 50:
-                bg_count += 1
-    
+                black_pixel += 1
+    # draw real line 
     cv2.line(img_to_draw, center, (end_x, end_y), (100, 100, 100), 1)
     
     # Return only the last point found for this specific ray
     last_point = found_points[-1] if found_points else None
-    return bg_count, len(found_points), last_point
+    # Return distance, number of founded point
+    return black_pixel, len(found_points), last_point
 
+# draw analysis and 
 def overlay_edges(original_img, edge_map):
     # 1. Ensure edge_map is 8-bit grayscale
     if len(edge_map.shape) == 3:
@@ -340,13 +346,18 @@ def overlay_edges(original_img, edge_map):
     composite[edge_map > 0] = [0, 0, 255]
     
     return composite
-def calculate_average_radius_pruned(center, surface_points, threshold=1.5):
+
+def calculate_radius_euclidean(center, surface_points):
     if not surface_points: return 0.0
     cx, cy = center
-    # Calculate all distances
+    # Calculate all distances Euclidean
     distances = [math.sqrt((p[0]-cx)**2 + (p[1]-cy)**2) for p in surface_points]
+    return distances
     
-    dist_arr = np.array(distances)
+#calulate average of distance
+def calculate_average_radius_pruned(distances, threshold=1.5):
+    # convert python list to Numpy array
+    dist_arr = np.array(distances)  
     mean_d = np.mean(dist_arr)
     std_d = np.std(dist_arr)
     
@@ -354,6 +365,16 @@ def calculate_average_radius_pruned(center, surface_points, threshold=1.5):
     filtered = [d for d in distances if (mean_d - threshold*std_d) <= d <= (mean_d + threshold*std_d)]
     
     return sum(filtered) / len(filtered) if filtered else 0.0
+# calculate median of distance
+def calculate_median_radius(distances):
+    if not distances or len(distances) == 0:
+        return 0.0
+    
+    # 2. Convert to a numpy array and calculate median
+    # np.median automatically handles the sorting and middle-value logic
+    median_val = np.median(distances) 
+    
+    return median_val
 def test():
     file_name = '6.65.1. original.jpg'
     img = read_images(f'dataset\\{file_name}')
@@ -372,13 +393,13 @@ def test():
     # 3. Pellet detection and Drawing (as you already have)
     
     
-    # --- CRITICAL FIX START ---
+    
     # Normalize the 64-bit float canny output to 8-bit (0-255)
     canny_norm = cv2.normalize(canny_img, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
     
     # Convert to BGR so we can draw RED (0,0,255) color on it
     canny_img_bgr = cv2.cvtColor(canny_norm, cv2.COLOR_GRAY2BGR)
-    # --- CRITICAL FIX END ---
+    
 
     # 2. Pellet detection
     detected = find_pellets(img, output_path=f'output\\{file_name}', seSize=7, intensity_percentage=0.9)
@@ -399,6 +420,175 @@ def test():
     cv2.waitKey(0)
     cv2.destroyAllWindows()
 
+
+def test3_1():
+    file_name = '6.65.1. original.jpg'
+    img = read_images(f'dataset\\{file_name}')
+    if img is None: return
+    img_filter_black = filter_rgb_to_black(img)[0]
+    gray_frame = cv2.cvtColor(img_filter_black, cv2.COLOR_BGR2GRAY)
+    canny_img = manual_canny(gray_frame, 100, 150)
+    composite_img = overlay_edges(img, canny_img)
+    # ... [Your existing processing logic] ...
+    canny_norm = cv2.normalize(canny_img, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+    canny_img_bgr = cv2.cvtColor(canny_norm, cv2.COLOR_GRAY2BGR)
+
+    # 2. Pellet detection
+    detected = find_pellets(img, output_path=f'output\\{file_name}', seSize=7, intensity_percentage=0.9)
+    
+    # 3. Drawing and Analysis
+    for i, pellet in enumerate(detected):
+        # Unpack the structure: ((x, y, w, h), cx, cy, diameter, compactness)
+        _, cx, cy, _, _ = pellet
+        center_point = (int(cx), int(cy))
+
+        # Draw center on original and canny
+        cv2.circle(img, center_point, 2, (0, 0, 255), -1)
+        cv2.circle(canny_img_bgr, center_point, 3, (0, 0, 255), -1)
+        text = str(i)
+        cv2.putText(canny_img_bgr, text, (int(cx) + 10, int(cy) - 10), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
+        last_coor = []
+        # 1. RAY SCANNING LOOP (Missing in your test3)
+        for angle in range(5, 361, 5):
+            # count_pixels_along_line returns: bg_count, found_times, last_point
+            _, found_times, last_pt = count_pixels_along_line(canny_img_bgr, canny_img_bgr, center_point, angle, 110)
+            
+            if last_pt is not None:
+                last_coor.append(last_pt) 
+
+        # 2. VALIDATION & PRUNING
+        # Check if at least 50% of rays hit a surface
+        if len(last_coor) >= 36:
+            # Apply statistical pruning to remove noise/outliers
+            avg_r = calculate_average_radius_pruned(center_point, last_coor, threshold=1.5)  
+            
+            if avg_r > 0:
+                # 3. VISUALIZATION
+                # Draw the final green circle based on the clean average
+                cv2.circle(canny_img_bgr, center_point, int(avg_r), (0, 255, 0), 2)
+                
+                print(f"Pellet {i} Analysis:")
+                print(f"  - Hits found: {len(last_coor)}/72")
+                print(f"  - Average Radius: {avg_r:.2f} px")
+            else:
+                print(f"Pellet {i} rejected: Statistical pruning resulted in 0 radius.")
+        else:
+            print(f"Pellet {i} rejected: Insufficient surface hits ({len(last_coor)}).")
+        # # Draw the line on the image to see what we are checking
+        # dx = np.cos(np.radians(angle))
+        # dy = np.sin(np.radians(angle))
+        # end_point = (int(cx + 100 * dx), int(cy + 100 * dy))
+        # cv2.line(canny_img_bgr, center_point, end_point, (255, 255, 0), 1)
+
+    # 4. Display
+    cv2.imshow('Pellet Centers', img)
+    cv2.imshow('Canny Output', canny_img_bgr)
+    cv2.imshow('Overlay Result', composite_img)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+def measured_radius(file_path):
+    img = read_images(file_path)
+    file_name = os.path.basename(file_path)
+    if img is None: return
+    
+    # Scaling Factor 
+    # Based on: 50 pixels = 6mm  => 50 pixel เป็นค่าเฉลี่ยของกรอบของแผ่นยา 
+    # Pixels to mm = (target_mm / pixels)
+    px_to_mm = 6.0 / 50.0 
+
+    # Processing
+    # convert pixel that rgb is 90-255 make it black
+    img_filter_black = filter_rgb_to_black(img)[0]
+    # GrayScale 
+    gray_frame = cv2.cvtColor(img_filter_black, cv2.COLOR_BGR2GRAY)
+    # Edge Detection
+    canny_img = manual_canny(gray_frame, 100, 150)
+
+    #stage1: Raw image    
+    stage1 = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    #stage2: Edge Detection on image
+    stage2 = cv2.cvtColor(overlay_edges(img, canny_img), cv2.COLOR_BGR2RGB)
+    
+    stage3_canvas = np.zeros_like(img) 
+    stage4_canvas = img.copy()
+    stage5_canvas = img.copy()
+    # detect medicine pallet (find center point)
+    detected = find_pellets(img, seSize=7, intensity_percentage=0.9)
+    
+    if detected:
+        for i, pellet in enumerate(detected):
+            _, cx, cy, _, _ = pellet
+            center_point = (int(cx), int(cy))
+            last_coor = []
+            
+            for angle in range(5, 361, 5):
+                _, _, last_pt = count_pixels_along_line(canny_img, stage3_canvas, center_point, angle, 110)
+                count_pixels_along_line(canny_img, stage4_canvas, center_point, angle, 110)
+                count_pixels_along_line(canny_img, stage5_canvas, center_point, angle, 110)
+                if last_pt is not None:
+                    last_coor.append(last_pt) 
+
+            if len(last_coor) >= 36:
+                distances = calculate_radius_euclidean(center_point,last_coor)
+                avg_r_px = calculate_average_radius_pruned(distances, threshold=1.5)  
+                median_r_px = calculate_median_radius(distances)  
+                
+                if avg_r_px > 0:
+                    # --- Convert to mm ---
+                    avg_r_mm = avg_r_px * px_to_mm
+                    diameter_mm_avg = avg_r_mm * 2
+                    
+                    median_r_mm = median_r_px * px_to_mm
+                    diameter_mm_median = median_r_mm * 2
+                    
+                    # Draw on canvases
+                    cv2.circle(stage3_canvas, center_point, int(avg_r_px), (0, 255, 0), 2)
+                    cv2.circle(stage4_canvas, center_point, int(avg_r_px), (0, 255, 0), 2)
+                    
+                    cv2.circle(stage5_canvas, center_point, int(median_r_px), (0, 255, 0), 2)
+                    
+                    # Display both Radius and Diameter in mm
+                    label = f"{diameter_mm_avg:.2f}mm"
+                    cv2.putText(stage4_canvas, label, (center_point[0]-30, center_point[1]-10),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+                    
+                    label = f"{diameter_mm_median:.2f}mm"
+                    cv2.putText(stage5_canvas, label, (center_point[0]-30, center_point[1]-10),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+
+    # Convert to RGB for Plotting
+    #stage3: analysis on the result of canny 
+    stage3 = cv2.cvtColor(stage3_canvas, cv2.COLOR_BGR2RGB)
+    #stage4: analysis on original image with canny
+    stage4 = cv2.cvtColor(stage4_canvas, cv2.COLOR_BGR2RGB)
+    stage5 = cv2.cvtColor(stage5_canvas, cv2.COLOR_BGR2RGB)
+    # stage4 = img_filter_black
+
+    # --- Plotting ---
+    fig, axes = plt.subplots(2, 3, figsize=(15, 10))
+    fig.suptitle(f"SIRscan Analysis: {file_name}", fontsize=16)
+
+    # Flatten the axes array to make indexing easy (axes[0], axes[1]...)
+    ax = axes.flatten()
+
+    # Row 1
+    ax[0].imshow(stage1); ax[0].set_title("1. Original"); ax[0].axis('off')
+    ax[1].imshow(stage2); ax[1].set_title("2. Canny Overlay"); ax[1].axis('off')
+    ax[2].imshow(stage3); ax[2].set_title("3. Analysis (Black BG)"); ax[2].axis('off')
+
+    # Row 2
+    ax[3].imshow(stage4); ax[3].set_title("4. Result Avg(mm)"); ax[3].axis('off')
+    ax[4].imshow(stage5); ax[4].set_title("5. Result Median(mm)"); ax[4].axis('off')
+
+    # Hide the empty 6th subplot
+    ax[5].axis('off')
+
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+    plt.show()
+    plt.close()
+
+# test2()
 
 def test2():
     file_name = '6.65.1. original.jpg'
@@ -463,6 +653,23 @@ def test2():
     cv2.imshow('Overlay Result', composite_img)
     cv2.waitKey(0)
     cv2.destroyAllWindows()
-    
-test2()
 
+
+
+def process_entire_dataset(folder_path='dataset'):
+    # Search for all jpg and png files in the folder
+    file_list = glob.glob(os.path.join(folder_path, "*.jpg")) + \
+                glob.glob(os.path.join(folder_path, "*.png"))
+    
+    if not file_list:
+        print(f"No images found in {folder_path}")
+        return
+
+    print(f"Found {len(file_list)} images. Starting processing...")
+
+    for file_path in file_list:
+        print(f"Processing: {os.path.basename(file_path)}")
+        measured_radius(file_path)
+        
+if __name__ == "__main__":
+    process_entire_dataset('dataset')
